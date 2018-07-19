@@ -7,6 +7,9 @@
 #include "ng_playlist.h"
 #include "ng_playlist_groups.h"
 #include "../config_columns_v2.h"
+#include "../playlist_item_helpers.h"
+#include "../playlist_view_tfhooks.h"
+#include "../button_items.h"
 
 namespace artwork_panel {
 // extern cfg_string cfg_front;
@@ -39,7 +42,9 @@ ng_playlist_view_t::ng_global_mesage_window ng_playlist_view_t::g_global_mesage_
 cfg_groups_t g_groups(g_groups_guid);
 
 cfg_bool cfg_show_artwork(g_show_artwork_guid, false), cfg_artwork_reflection(g_artwork_reflection, true),
-    cfg_artwork_lowpriority(g_artwork_lowpriority, true), cfg_grouping(g_guid_grouping, true);
+    cfg_artwork_lowpriority(g_artwork_lowpriority, true);
+
+fbh::ConfigBool cfg_grouping(g_guid_grouping, true, [](auto&&) { cui::button_items::ShowGroupsButton::s_on_change(); });
 fbh::ConfigUint32DpiAware cfg_artwork_width(g_artwork_width_guid, 100);
 
 void cfg_groups_t::swap(t_size index1, t_size index2)
@@ -214,6 +219,7 @@ void ng_playlist_view_t::refresh_columns()
     }
     set_columns(columns);
 }
+
 void ng_playlist_view_t::g_on_groups_change()
 {
     for (auto& window : g_windows)
@@ -351,23 +357,10 @@ void ng_playlist_view_t::g_on_edge_style_change()
     for (auto& window : g_windows)
         window->set_edge_style(cfg_frame);
 }
-void ng_playlist_view_t::g_on_use_date_info_change()
-{
-    for (auto& window : g_windows)
-        window->on_use_date_info_change();
-}
 void ng_playlist_view_t::g_on_time_change()
 {
     for (auto& window : g_windows)
         window->on_time_change();
-}
-void ng_playlist_view_t::on_use_date_info_change()
-{
-    if (cfg_playlist_date)
-        set_day_timer();
-    else
-        kill_day_timer();
-    update_items(0, get_item_count());
 }
 void ng_playlist_view_t::g_on_show_tooltips_change()
 {
@@ -393,6 +386,12 @@ void ng_playlist_view_t::on_columns_change()
         refresh_columns();
         populate_list();
     }
+}
+
+void ng_playlist_view_t::s_redraw_all()
+{
+    for (auto&& window : g_windows)
+        RedrawWindow(window->get_wnd(), nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
 }
 
 int g_compare_wchar(const pfc::array_t<WCHAR>& a, const pfc::array_t<WCHAR>& b)
@@ -422,10 +421,8 @@ void ng_playlist_view_t::notify_sort_column(t_size index, bool b_descending, boo
         if (b_selection_only)
             m_playlist_api->activeplaylist_get_selection_mask(mask);
 
-        bool date = cfg_playlist_date != 0;
         SYSTEMTIME st;
-        if (date)
-            GetLocalTime(&st);
+        GetLocalTime(&st);
 
         t_size counter = 0;
 
@@ -438,17 +435,17 @@ void ng_playlist_view_t::notify_sort_column(t_size index, bool b_descending, boo
                     titleformat_hook_playlist_name tf_hook_playlist_name;
 
                     if (extra) {
-                        titleformat_hook_set_global<true, false> tf_hook_set_global(extra_items, false);
+                        titleformat_hook_set_global<true, false> tf_hook_set_global(extra_items);
                         titleformat_hook_splitter_pt3 tf_hook(
-                            &tf_hook_set_global, date ? &tf_hook_date : nullptr, &tf_hook_playlist_name);
+                            &tf_hook_set_global, &tf_hook_date, &tf_hook_playlist_name);
                         pfc::string8 output;
                         m_playlist_api->activeplaylist_item_format_title(
                             n, &tf_hook, output, m_script_global, nullptr, play_control::display_level_none);
                     }
 
-                    titleformat_hook_set_global<false, true> tf_hook_get_global(extra_items, false);
+                    titleformat_hook_set_global<false, true> tf_hook_get_global(extra_items);
                     titleformat_hook_splitter_pt3 tf_hook(
-                        extra ? &tf_hook_get_global : nullptr, date ? &tf_hook_date : nullptr, &tf_hook_playlist_name);
+                        extra ? &tf_hook_get_global : nullptr, &tf_hook_date, &tf_hook_playlist_name);
                     m_playlist_api->activeplaylist_item_format_title(n, &tf_hook, temp,
                         m_column_data[index].m_sort_script, nullptr, play_control::display_level_none);
                 }
@@ -553,11 +550,10 @@ void ng_playlist_view_t::notify_on_create()
         g_global_mesage_window.create(nullptr);
     g_windows.push_back(this);
 
-    if (cfg_playlist_date)
-        set_day_timer();
+    set_day_timer();
 
     console::formatter formatter;
-    formatter << "NG playlist initialised in: " << pfc::format_float(timer.query(), 0, 3) << " s";
+    formatter << "Playlist view initialised in: " << pfc::format_float(timer.query(), 0, 3) << " s";
 }
 
 void ng_playlist_view_t::notify_on_destroy()
@@ -688,7 +684,6 @@ bool ng_playlist_view_t::notify_on_contextmenu_header(const POINT& pt, const HDH
         tab_columns_v3::get_instance().show_column(column_index_display_to_actual(index));
     } else if (cmd == IDM_AUTOSIZE) {
         cfg_nohscroll = cfg_nohscroll == 0;
-        playlist_view::update_all_windows();
         pvt::ng_playlist_view_t::g_on_autosize_change();
     } else if (cmd == IDM_PREFS) {
         static_api_ptr_t<ui_control>()->show_preferences(columns::config_get_playlist_view_guid());
@@ -698,11 +693,6 @@ bool ng_playlist_view_t::notify_on_contextmenu_header(const POINT& pt, const HDH
     } else if (cmd >= IDM_CUSTOM_BASE) {
         if (t_size(cmd - IDM_CUSTOM_BASE) < g_columns.get_count()) {
             g_columns[cmd - IDM_CUSTOM_BASE]->show = !g_columns[cmd - IDM_CUSTOM_BASE]->show; // g_columns
-            // if (!cfg_nohscroll)
-            // playlist_view::g_save_columns();
-            // g_cache.flush_all();
-            playlist_view::g_reset_columns();
-            playlist_view::update_all_windows();
             pvt::ng_playlist_view_t::g_on_columns_change();
         }
     }
@@ -837,18 +827,17 @@ void ng_playlist_view_t::notify_update_item_data(t_size index)
     pfc::string8_fast_aggressive temp, str_dummy;
     temp.prealloc(32);
     global_variable_list globals;
-    bool b_global = m_script_global.is_valid(), b_date = cfg_playlist_date != 0;
+    bool b_global = m_script_global.is_valid();
     SYSTEMTIME st;
     memset(&st, 0, sizeof(SYSTEMTIME));
-    if (b_date)
-        GetLocalTime(&st);
+    GetLocalTime(&st);
 
     titleformat_hook_date tf_hook_date(&st);
     titleformat_hook_playlist_name tf_hook_playlist_name;
 
     if (b_global) {
-        titleformat_hook_set_global<true, false> tf_hook_set_global(globals, false);
-        titleformat_hook_splitter_pt3 tf_hook(&tf_hook_set_global, b_date ? &tf_hook_date : nullptr, &tf_hook_date);
+        titleformat_hook_set_global<true, false> tf_hook_set_global(globals);
+        titleformat_hook_splitter_pt3 tf_hook(&tf_hook_set_global, &tf_hook_date, &tf_hook_playlist_name);
         m_playlist_api->activeplaylist_item_format_title(
             index, &tf_hook, str_dummy, m_script_global, nullptr, play_control::display_level_all);
     }
@@ -863,7 +852,7 @@ void ng_playlist_view_t::notify_update_item_data(t_size index)
     metadb_handle_ptr ptr;
     m_playlist_api->activeplaylist_get_item_handle(ptr, index);
 
-    titleformat_hook_set_global<false, true> tf_hook_get_global(globals, false);
+    titleformat_hook_set_global<false, true> tf_hook_get_global(globals);
 
     t_size item_index = get_item_display_index(index);
     for (i = 0; i < count_display_groups; i++) {
@@ -871,8 +860,8 @@ void ng_playlist_view_t::notify_update_item_data(t_size index)
         style_data_cell_info_t style_data_group = style_data_cell_info_t::g_create_default();
         if (ptr.is_valid() && m_script_global_style.is_valid()) {
             titleformat_hook_style_v2 tf_hook_style(style_data_group, item_index - i - 1, true);
-            titleformat_hook_splitter_pt3 tf_hook(&tf_hook_style, b_global ? &tf_hook_get_global : nullptr,
-                b_date ? &tf_hook_date : nullptr, &tf_hook_playlist_name);
+            titleformat_hook_splitter_pt3 tf_hook(
+                &tf_hook_style, b_global ? &tf_hook_get_global : nullptr, &tf_hook_date, &tf_hook_playlist_name);
             ptr->format_title(&tf_hook, temp, m_script_global_style, nullptr);
         }
         // count_display_groups > 0 => count_groups > 0
@@ -882,7 +871,7 @@ void ng_playlist_view_t::notify_update_item_data(t_size index)
     for (i = 0; i < count; i++) {
         {
             titleformat_hook_splitter_pt3 tf_hook(
-                b_global ? &tf_hook_get_global : nullptr, b_date ? &tf_hook_date : nullptr, &tf_hook_playlist_name);
+                b_global ? &tf_hook_get_global : nullptr, &tf_hook_date, &tf_hook_playlist_name);
             m_playlist_api->activeplaylist_item_format_title(
                 index, &tf_hook, temp, m_column_data[i].m_display_script, nullptr, playback_control::display_level_all);
             p_out[i] = temp;
@@ -897,7 +886,7 @@ void ng_playlist_view_t::notify_update_item_data(t_size index)
                 if (m_script_global_style.is_valid()) {
                     titleformat_hook_style_v2 tf_hook_style(style_data_item, item_index);
                     titleformat_hook_splitter_pt3 tf_hook(&tf_hook_style, b_global ? &tf_hook_get_global : nullptr,
-                        b_date ? &tf_hook_date : nullptr, &tf_hook_playlist_name);
+                        &tf_hook_date, &tf_hook_playlist_name);
                     m_playlist_api->activeplaylist_item_format_title(
                         index, &tf_hook, temp, m_script_global_style, nullptr, play_control::display_level_all);
                 }
@@ -909,8 +898,8 @@ void ng_playlist_view_t::notify_update_item_data(t_size index)
         if (b_custom) {
             if (m_column_data[i].m_style_script.is_valid()) {
                 titleformat_hook_style_v2 tf_hook_style(style_temp, item_index);
-                titleformat_hook_splitter_pt3 tf_hook(&tf_hook_style, b_global ? &tf_hook_get_global : nullptr,
-                    b_date ? &tf_hook_date : nullptr, &tf_hook_playlist_name);
+                titleformat_hook_splitter_pt3 tf_hook(
+                    &tf_hook_style, b_global ? &tf_hook_get_global : nullptr, &tf_hook_date, &tf_hook_playlist_name);
                 m_playlist_api->activeplaylist_item_format_title(
                     index, &tf_hook, temp, m_column_data[i].m_style_script, nullptr, play_control::display_level_all);
             }
@@ -928,7 +917,7 @@ const style_data_t& ng_playlist_view_t::get_style_data(t_size index)
 }
 bool ng_playlist_view_t::notify_on_middleclick(bool on_item, t_size index)
 {
-    return playlist_mclick_actions::run(cfg_playlist_middle_action, on_item, index);
+    return cui::playlist_item_helpers::mclick_action::run(cfg_playlist_middle_action, on_item, index);
 }
 bool ng_playlist_view_t::notify_on_doubleleftclick_nowhere()
 {
@@ -1099,7 +1088,7 @@ const GUID& ng_playlist_view_t::get_extension_guid() const
 
 void ng_playlist_view_t::get_name(pfc::string_base& out) const
 {
-    out.set_string("NG playlist");
+    out.set_string("Playlist view");
 }
 bool ng_playlist_view_t::get_short_name(pfc::string_base& out) const
 {
@@ -1138,7 +1127,7 @@ const GUID g_guid_group_header_font = {0xfb127ffa, 0x1b35, 0x4572, {0x9c, 0x1a, 
 class font_client_ngpv : public cui::fonts::client {
 public:
     const GUID& get_client_guid() const override { return g_guid_items_font; }
-    void get_name(pfc::string_base& p_out) const override { p_out = "NG playlist: Items"; }
+    void get_name(pfc::string_base& p_out) const override { p_out = "Playlist view: Items"; }
 
     cui::fonts::font_type_t get_default_font_type() const override { return cui::fonts::font_type_items; }
 
@@ -1148,7 +1137,7 @@ public:
 class font_header_client_ngpv : public cui::fonts::client {
 public:
     const GUID& get_client_guid() const override { return g_guid_header_font; }
-    void get_name(pfc::string_base& p_out) const override { p_out = "NG playlist: Column titles"; }
+    void get_name(pfc::string_base& p_out) const override { p_out = "Playlist view: Column titles"; }
 
     cui::fonts::font_type_t get_default_font_type() const override { return cui::fonts::font_type_items; }
 
@@ -1158,7 +1147,7 @@ public:
 class font_group_header_client_ngpv : public cui::fonts::client {
 public:
     const GUID& get_client_guid() const override { return g_guid_group_header_font; }
-    void get_name(pfc::string_base& p_out) const override { p_out = "NG playlist: Group titles"; }
+    void get_name(pfc::string_base& p_out) const override { p_out = "Playlist view: Group titles"; }
 
     cui::fonts::font_type_t get_default_font_type() const override { return cui::fonts::font_type_items; }
 

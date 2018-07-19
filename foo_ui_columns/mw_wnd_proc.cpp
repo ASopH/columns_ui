@@ -5,6 +5,7 @@
 #include "get_msg_hook.h"
 #include "rebar.h"
 #include "status_bar.h"
+#include "notification_area.h"
 
 INT_PTR g_taskbar_bitmaps[] = {IDI_STOP, IDI_PREV, IDI_PAUSE, IDI_PLAY, IDI_NEXT, IDI_RAND};
 
@@ -32,7 +33,25 @@ service_ptr_t<contextmenu_manager> g_main_nowplaying;
 get_msg_hook_t g_get_msg_hook;
 static HWND wnd_last;
 
-LRESULT CALLBACK g_MainWindowProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
+LRESULT cui::MainWindow::s_on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    MainWindow* self = nullptr;
+
+    if (msg == WM_NCCREATE) {
+        const auto create_struct = reinterpret_cast<CREATESTRUCT*>(lp);
+        self = reinterpret_cast<MainWindow*>(create_struct->lpCreateParams);
+        SetWindowLongPtr(wnd, GWLP_USERDATA, reinterpret_cast<LPARAM>(self));
+    } else {
+        self = reinterpret_cast<MainWindow*>(GetWindowLongPtr(wnd, GWLP_USERDATA));
+    }
+
+    if (msg == WM_NCDESTROY)
+        SetWindowLongPtr(wnd, GWLP_USERDATA, reinterpret_cast<LPARAM>(nullptr));
+
+    return self ? self->on_message(wnd, msg, wp, lp) : DefWindowProc(wnd, msg, wp, lp);
+}
+
+LRESULT cui::MainWindow::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     static UINT WM_TASKBARCREATED;
     static UINT WM_TASKBARBUTTONCREATED;
@@ -44,9 +63,9 @@ LRESULT CALLBACK g_MainWindowProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
 
     static HIMAGELIST g_imagelist_taskbar;
 
-    if (main_window::g_hookproc) {
+    if (m_hook_proc) {
         LRESULT ret;
-        if (main_window::g_hookproc(wnd, msg, wp, lp, &ret)) {
+        if (m_hook_proc(wnd, msg, wp, lp, &ret)) {
             return ret;
         }
     }
@@ -64,8 +83,8 @@ LRESULT CALLBACK g_MainWindowProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
     if (WM_TASKBARBUTTONCREATED && msg == WM_TASKBARBUTTONCREATED) {
         mmh::ComPtr<ITaskbarList> p_ITaskbarList;
         if (SUCCEEDED(p_ITaskbarList.instantiate(CLSID_TaskbarList))) {
-            main_window::g_ITaskbarList3 = p_ITaskbarList;
-            if (main_window::g_ITaskbarList3.is_valid() && SUCCEEDED(main_window::g_ITaskbarList3->HrInit())) {
+            m_taskbar_list = p_ITaskbarList;
+            if (m_taskbar_list.is_valid() && SUCCEEDED(m_taskbar_list->HrInit())) {
                 const unsigned cx = GetSystemMetrics(SM_CXSMICON), cy = GetSystemMetrics(SM_CYSMICON);
 
                 g_imagelist_taskbar = ImageList_Create(cx, cy, ILC_COLOR32, 0, 6);
@@ -79,15 +98,15 @@ LRESULT CALLBACK g_MainWindowProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
                     DestroyIcon(icon);
                 }
 
-                if (SUCCEEDED(main_window::g_ITaskbarList3->ThumbBarSetImageList(wnd, g_imagelist_taskbar))) {
-                    g_update_taskbar_buttons_delayed(true);
+                if (SUCCEEDED(m_taskbar_list->ThumbBarSetImageList(wnd, g_imagelist_taskbar))) {
+                    queue_taskbar_button_update(false);
                 } else
-                    main_window::g_ITaskbarList3.release();
+                    m_taskbar_list.release();
             }
         }
     }
 
-    if (WM_SHELLHOOKMESSAGE && msg == WM_SHELLHOOKMESSAGE) {
+    if (WM_SHELLHOOKMESSAGE && msg == WM_SHELLHOOKMESSAGE && m_should_handle_multimedia_keys) {
         if (wp == HSHELL_APPCOMMAND) {
             short cmd = GET_APPCOMMAND_LPARAM(lp);
             WORD uDevice = GET_DEVICE_LPARAM(lp);
@@ -119,56 +138,38 @@ LRESULT CALLBACK g_MainWindowProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
 
     switch (msg) {
     case WM_CREATE: {
-        /* initialise ui */
-
-        //            modeless_dialog_manager::add(wnd);
-
         WM_TASKBARCREATED = RegisterWindowMessage(L"TaskbarCreated");
-        WM_SHELLHOOKMESSAGE = RegisterWindowMessage(TEXT("SHELLHOOK"));
         WM_TASKBARBUTTONCREATED = RegisterWindowMessage(L"TaskbarButtonCreated");
 
-        RegisterShellHookWindow(wnd);
+        if (m_should_handle_multimedia_keys) {
+            WM_SHELLHOOKMESSAGE = RegisterWindowMessage(TEXT("SHELLHOOK"));
+            m_shell_hook_registered = RegisterShellHookWindow(wnd) != 0;
+        }
 
         INITCOMMONCONTROLSEX icex;
         icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
         icex.dwICC = ICC_BAR_CLASSES | ICC_COOL_CLASSES | ICC_LISTVIEW_CLASSES | ICC_TAB_CLASSES | ICC_WIN95_CLASSES;
         InitCommonControlsEx(&icex);
 
-        cui::g_main_window.initialise();
-
-        // g_gdiplus_initialised = (Gdiplus::Ok == Gdiplus::GdiplusStartup(&g_gdiplus_instance,
-        // &Gdiplus::GdiplusStartupInput(), NULL));
+        on_create();
 
         if (!uih::are_keyboard_cues_enabled())
             SendMessage(wnd, WM_CHANGEUISTATE, MAKEWPARAM(UIS_INITIALIZE, UISF_HIDEFOCUS), NULL);
 
-        g_main_window = wnd;
+        m_wnd = wnd;
         statusbartext = core_version_info::g_get_version_string();
-        set_main_window_text("foobar2000" /*core_version_info::g_get_version_string()*/);
+        set_title(core_version_info_v2::get()->get_name());
         if (cfg_show_systray)
             create_systray_icon();
 
         HRESULT hr = OleInitialize(nullptr);
         pfc::com_ptr_t<drop_handler_interface> drop_handler = new drop_handler_interface;
-        RegisterDragDrop(g_main_window, drop_handler.get_ptr());
+        RegisterDragDrop(m_wnd, drop_handler.get_ptr());
 
-        /* end of initialisation */
-
-        //            ShowWindow(wnd, SW_SHOWNORMAL);
-
-        make_ui();
+        create_child_windows();
 
         g_get_msg_hook.register_hook();
 
-        // lets try recursively in wm_showwindow
-
-        //            SetWindowPos(wnd, 0, cfg_window_placement_columns.get_value().rcNormalPosition.left,
-        //            cfg_window_placement_columns.get_value().rcNormalPosition.top,
-        //            cfg_window_placement_columns.get_value().rcNormalPosition.right -
-        //            cfg_window_placement_columns.get_value().rcNormalPosition.left,
-        //            cfg_window_placement_columns.get_value().rcNormalPosition.bottom -
-        //            cfg_window_placement_columns.get_value().rcNormalPosition.top, SWP_NOZORDER); ShowWindow(wnd,
-        //            SW_SHOWNORMAL);
         if (config_object::g_get_data_bool_simple(standard_config_objects::bool_ui_always_on_top, false))
             SendMessage(wnd, MSG_SET_AOT, TRUE, 0);
     }
@@ -177,14 +178,15 @@ LRESULT CALLBACK g_MainWindowProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_DESTROY: {
         g_get_msg_hook.deregister_hook();
         g_layout_window.destroy();
-        DeregisterShellHookWindow(wnd);
+        if (m_shell_hook_registered)
+            DeregisterShellHookWindow(wnd);
 
         destroy_rebar(false);
         status_bar::destroy_status_window();
-        main_window::g_ITaskbarList3.release();
-        RevokeDragDrop(g_main_window);
+        m_taskbar_list.release();
+        RevokeDragDrop(m_wnd);
         destroy_systray_icon();
-        cui::g_main_window.deinitialise();
+        on_destroy();
         OleUninitialize();
     } break;
     case WM_NCDESTROY:
@@ -192,7 +194,7 @@ LRESULT CALLBACK g_MainWindowProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
             ImageList_Destroy(g_imagelist_taskbar);
         break;
     case WM_CLOSE:
-        if (g_advbool_close_to_tray.get_static_instance().get_state()) {
+        if (cui::config::advbool_close_to_notification_icon.get()) {
             cfg_go_to_tray = true;
             ShowWindow(wnd, SW_MINIMIZE);
         } else
@@ -266,12 +268,9 @@ LRESULT CALLBACK g_MainWindowProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
             if (!g_rebar_window || !g_rebar_window->get_previous_menu_focus_window(g_wnd_focused_before_menu))
                 g_wnd_focused_before_menu = g_layout_window.get_previous_menu_focus_window();
 
-            // if (is_win2k_or_newer())
-            {
-                if (g_rebar_window)
-                    g_rebar_window->hide_accelerators();
-                g_layout_window.hide_menu_access_keys();
-            }
+            if (g_rebar_window)
+                g_rebar_window->hide_accelerators();
+            g_layout_window.hide_menu_access_keys();
         }
     } break;
     case WM_SETFOCUS: {
@@ -465,9 +464,6 @@ LRESULT CALLBACK g_MainWindowProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
             }
         }
         break;
-    case MSG_UPDATE_THUMBBAR:
-        g_update_taskbar_buttons_now(wp != 0);
-        break;
     case MSG_SET_AOT:
         SetWindowPos(wnd, wp ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
         break;
@@ -475,7 +471,7 @@ LRESULT CALLBACK g_MainWindowProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         update_status();
         break;
     case MSG_UPDATE_TITLE:
-        update_titlebar();
+        update_title();
         break;
     case MSG_RUN_INITIAL_SETUP:
         setup_dialog_t::g_run();
@@ -488,9 +484,9 @@ LRESULT CALLBACK g_MainWindowProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         if (lpdis->CtlID == ID_STATUS) {
             RECT rc = lpdis->rcItem;
             //            rc.right -= 3;
-            if (!cfg_show_vol && !cfg_show_seltime && !IsZoomed(g_main_window)) {
+            if (!cfg_show_vol && !cfg_show_seltime && !IsZoomed(m_wnd)) {
                 RECT rc_main;
-                GetClientRect(g_main_window, &rc_main);
+                GetClientRect(m_wnd, &rc_main);
                 rc.right = rc_main.right - GetSystemMetrics(SM_CXVSCROLL);
             } else {
                 int blah[3];
@@ -523,7 +519,7 @@ LRESULT CALLBACK g_MainWindowProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
                     ShowWindow(wnd, SW_HIDE);
             } else {
                 g_minimised = false;
-                size_windows();
+                resize_child_windows();
             }
         }
     } break;
@@ -544,17 +540,14 @@ LRESULT CALLBACK g_MainWindowProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         win32_helpers::send_message_to_direct_children(wnd, msg, wp, lp);
         break;
     case WM_THEMECHANGED:
-        if (mmh::is_windows_xp_or_newer()) {
-            if (g_rebar_window)
-                g_rebar_window->on_themechanged();
-            if (g_status) {
-                status_bar::destroy_theme_handle();
-                status_bar::create_theme_handle();
-                status_bar::set_part_sizes(status_bar::t_parts_none);
-            }
+        if (g_rebar_window)
+            g_rebar_window->on_themechanged();
+        if (g_status) {
+            status_bar::destroy_theme_handle();
+            status_bar::create_theme_handle();
+            status_bar::set_part_sizes(status_bar::t_parts_none);
         }
         break;
-
     case WM_KEYDOWN:
         if (process_keydown(msg, lp, wp))
             return 0;
@@ -589,7 +582,7 @@ LRESULT CALLBACK g_MainWindowProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
             return TRUE;
         } else if (lp == WM_MOUSEMOVE) {
         } else if (lp == WM_XBUTTONUP) {
-            if (g_advbool_notification_icon_x_buttons.get_static_instance().get_state()) {
+            if (cui::config::advbool_notification_icon_x_buttons.get()) {
                 if (g_last_sysray_x1_down && !g_last_sysray_x2_down)
                     standard_commands::main_previous();
                 if (g_last_sysray_x2_down && !g_last_sysray_x1_down)
@@ -747,9 +740,6 @@ LRESULT CALLBACK g_MainWindowProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
             return TRUE;
         }
         break;
-    case MSG_SIZE:
-        size_windows();
-        return 0;
 
     case WM_NOTIFY:
         auto lpnmh = reinterpret_cast<LPNMHDR>(lp);
@@ -758,7 +748,7 @@ LRESULT CALLBACK g_MainWindowProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         case ID_REBAR:
             switch (lpnmh->code) {
             case RBN_HEIGHTCHANGE: {
-                size_windows();
+                resize_child_windows();
             } break;
             case RBN_LAYOUTCHANGED: {
                 if (g_rebar_window) {

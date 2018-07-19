@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ng_playlist_style.h"
-#include "../playlist_view.h"
+#include "../playlist_view_tfhooks.h"
 #include "../artwork.h"
 #include "../config.h"
 #include "../list_view_panel.h"
@@ -9,8 +9,9 @@
 namespace pvt {
 extern const GUID g_guid_items_font, g_guid_header_font, g_guid_group_header_font;
 
-extern cfg_bool cfg_show_artwork, cfg_artwork_reflection, cfg_artwork_lowpriority, cfg_grouping;
+extern cfg_bool cfg_show_artwork, cfg_artwork_reflection, cfg_artwork_lowpriority;
 extern fbh::ConfigUint32DpiAware cfg_artwork_width;
+extern fbh::ConfigBool cfg_grouping;
 
 HBITMAP g_create_hbitmap_from_image(Gdiplus::Bitmap& bm, t_size& cx, t_size& cy, COLORREF cr_back, bool b_reflection);
 HBITMAP g_create_hbitmap_from_data(
@@ -296,7 +297,7 @@ public:
 
     const GUID& get_client_guid() const override { return g_guid; };
 
-    void get_name(pfc::string_base& p_out) const override { p_out = "NG playlist"; };
+    void get_name(pfc::string_base& p_out) const override { p_out = "Playlist view"; };
 
     t_size get_supported_colours() const override { return cui::colours::colour_flag_all; }; // bit-mask
     t_size get_supported_bools() const override
@@ -364,11 +365,8 @@ public:
     static void g_on_sorting_enabled_change();
     static void g_on_show_sort_indicators_change();
     static void g_on_edge_style_change();
-    static void g_on_use_date_info_change();
-
+    static void s_redraw_all();
     static void g_on_time_change();
-
-    void on_use_date_info_change();
 
     const GUID& get_extension_guid() const override;
     void get_name(pfc::string_base& out) const override;
@@ -574,7 +572,6 @@ private:
         if (act != pfc_infinite && act < g_columns.get_count()) {
             g_columns[act]->width = new_width;
             g_on_column_widths_change(this);
-            playlist_view::g_on_columns_size_change();
         }
     };
 
@@ -583,8 +580,6 @@ private:
         t_size act_from = column_index_display_to_actual(index_from);
         t_size act_to = column_index_display_to_actual(index_to);
         g_columns.move(act_from, act_to);
-        playlist_view::g_reset_columns();
-        playlist_view::update_all_windows();
         pvt::ng_playlist_view_t::g_on_columns_change();
     }
 
@@ -597,15 +592,10 @@ private:
         return false;
     };
 
-    void notify_on_time_change() override{
-        // on_time_change();
-    };
     void on_time_change()
     {
-        if (cfg_playlist_date) {
-            update_items(0, get_item_count());
-            set_day_timer();
-        }
+        update_items(0, get_item_count());
+        set_day_timer();
     };
 
     bool m_day_timer_active{false};
@@ -726,16 +716,22 @@ public:
 };
 
 class preferences_tab_impl : public preferences_tab {
-    static BOOL CALLBACK ConfigProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp);
-
 public:
-    HWND create(HWND parent) override { return uCreateDialog(IDD_CONFIG_NG, parent, ConfigProc); }
+    HWND create(HWND wnd) override
+    {
+        return m_helper.create(wnd, IDD_PREFS_PVIEW_GROUPS,
+            [this](auto&&... args) { return ConfigProc(std::forward<decltype(args)>(args)...); });
+    }
     const char* get_name() override { return "Grouping"; }
     bool get_help_url(pfc::string_base& p_out) override
     {
         p_out = "http://yuo.be/wiki/columns_ui:config:playlist_view:grouping";
         return true;
     }
+
+private:
+    BOOL ConfigProc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp);
+    cui::prefs::PreferencesTabHelper m_helper{IDC_TITLE1};
 };
 } // namespace pvt
 

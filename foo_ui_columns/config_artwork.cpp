@@ -85,6 +85,7 @@ public:
             set_group_count(1);
             set_autosize(true);
             set_show_header(false);
+            set_group_level_indentation_enabled(false);
             pfc::list_t<Column> columns;
             columns.set_count(1);
             columns[0].m_title = "Source script";
@@ -198,7 +199,7 @@ public:
     {
         switch (msg) {
         case WM_INITDIALOG: {
-            HWND wnd_fields = m_source_list.create(wnd, uih::WindowPosition(7, 42, 271, 75), true);
+            HWND wnd_fields = m_source_list.create(wnd, uih::WindowPosition(7, 49, 313, 92), true);
             SetWindowPos(wnd_fields, HWND_TOP, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE);
 
             refresh_me(wnd);
@@ -340,8 +341,8 @@ public:
     void apply() {}
     HWND create(HWND wnd) override
     {
-        return m_helper.create(
-            wnd, IDD_ARTWORK, [this](auto&&... args) { return on_message(std::forward<decltype(args)>(args)...); });
+        return m_helper.create(wnd, IDD_PREFS_ARTWORK,
+            [this](auto&&... args) { return on_message(std::forward<decltype(args)>(args)...); });
     }
     const char* get_name() override { return "Artwork"; }
     bool get_help_url(pfc::string_base& p_out) override

@@ -153,7 +153,6 @@ class export_columns : public cui::fcl::dataset {
         }
 
         g_columns.set_entries_ref(newcolumns);
-        refresh_all_playlist_views();
         pvt::ng_playlist_view_t::g_on_columns_change();
     }
 };
@@ -332,7 +331,7 @@ class export_pview : public cui::fcl::dataset {
         out.write_item(identifier_show_header, cfg_header);
         out.write_item(identifier_autosize_columns, cfg_nohscroll);
         out.write_item(identifier_use_globals_for_sorting, cfg_global_sort);
-        out.write_item(identifier_use_dates, cfg_playlist_date);
+        out.write_item(identifier_use_dates, static_cast<int32_t>(true));
         out.write_item(identifier_use_globals, cfg_global);
     }
     void set_data(stream_reader* p_reader, t_size stream_size, t_uint32 type, cui::fcl::t_import_feedback& feedback,
@@ -362,9 +361,6 @@ class export_pview : public cui::fcl::dataset {
             case identifier_use_globals_for_sorting:
                 reader.read_item(cfg_global_sort);
                 break;
-            case identifier_use_dates:
-                reader.read_item(cfg_playlist_date);
-                break;
             case identifier_use_globals:
                 reader.read_item(cfg_global);
                 break;
@@ -374,7 +370,6 @@ class export_pview : public cui::fcl::dataset {
             }
         }
 
-        refresh_all_playlist_views();
         pvt::ng_playlist_view_t::g_on_autosize_change();
         pvt::ng_playlist_view_t::g_on_vertical_item_padding_change();
         pvt::ng_playlist_view_t::g_on_show_header_change();

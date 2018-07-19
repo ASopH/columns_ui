@@ -3,14 +3,6 @@
 #include "columns_v2.h"
 #include "config_host.h"
 
-#define COLOUR_HELP                                                                                     \
-    "Style string - $set_style(text,<text colour>,<selected text colour>)\r\n"                          \
-    "$set_style(back,<background colour>,<selected background colour>[,<selected background colour no " \
-    "focus>])\r\n\r\n"                                                                                  \
-    "Square brackets denote an optional parameter."
-
-extern cfg_int cfg_import_titles, cfg_export_titles;
-
 namespace columns {
 const GUID& config_get_playlist_view_guid();
 const GUID& config_get_main_guid();
@@ -34,14 +26,13 @@ void g_show_artwork_settings();
 preferences_tab* g_get_tab_layout();
 preferences_tab* g_get_tab_artwork();
 preferences_tab* g_get_tab_display2();
+preferences_tab* g_get_tab_pview_artwork();
 preferences_tab* g_get_tab_sys();
 preferences_tab* g_get_tab_playlist();
 preferences_tab* g_get_tab_playlist_dd();
 preferences_tab* g_get_tab_main();
 preferences_tab* g_get_tab_status();
 preferences_tab* g_get_tab_global();
-
-extern preferences_tab *const g_tab_filter_fields, *const g_tab_filter_misc;
 
 void refresh_appearance_prefs();
 void colour_code_gen(HWND parent, UINT edit, bool markers, bool init);
@@ -103,7 +94,7 @@ public:
         }
     }
 };
-void speedtest(column_list_cref_t columns, bool b_global, bool b_legacy, bool b_date);
+void speedtest(column_list_cref_t columns, bool b_global);
 
 extern editor_font_notify g_editor_font_notify;
 extern cfg_uint g_last_colour;

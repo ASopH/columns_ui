@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "config.h"
-#include "main_window.h"
+#include "notification_area.h"
 
 static class tab_sys : public preferences_tab {
 public:
@@ -67,22 +67,7 @@ public:
             case IDC_SHOW_SYSTRAY: {
                 cfg_show_systray = SendMessage((HWND)lp, BM_GETCHECK, 0, 0);
                 //                EnableWindow(GetDlgItem(wnd, IDC_MINIMISE_TO_SYSTRAY), cfg_show_systray);
-
-                if (g_main_window) {
-                    auto is_iconic = IsIconic(g_main_window) != 0;
-                    if (cfg_show_systray && !g_icon_created) {
-                        create_systray_icon();
-                    } else if (!cfg_show_systray && g_icon_created
-                        && (!is_iconic
-                               || (!cfg_minimise_to_tray
-                                      && !g_advbool_close_to_tray.get_static_instance().get_state()))) {
-                        destroy_systray_icon();
-                        if (is_iconic)
-                            standard_commands::main_activate();
-                    }
-                    if (g_status)
-                        update_systray();
-                }
+                on_show_notification_area_icon_change();
             } break;
             case IDC_BALLOON: {
                 cfg_balloon = SendMessage((HWND)lp, BM_GETCHECK, 0, 0);
@@ -93,8 +78,8 @@ public:
     }
     HWND create(HWND wnd) override
     {
-        return m_helper.create(
-            wnd, IDD_SYS, [this](auto&&... args) { return ConfigProc(std::forward<decltype(args)>(args)...); });
+        return m_helper.create(wnd, IDD_PREFS_NOTIFICATION_AREA,
+            [this](auto&&... args) { return ConfigProc(std::forward<decltype(args)>(args)...); });
     }
     const char* get_name() override { return "Notification area"; }
     bool get_help_url(pfc::string_base& p_out) override
@@ -102,7 +87,7 @@ public:
         p_out = "http://yuo.be/wiki/columns_ui:config:notification_area";
         return true;
     }
-    cui::prefs::PreferencesTabHelper m_helper{{IDC_TITLE1}};
+    cui::prefs::PreferencesTabHelper m_helper{IDC_TITLE1};
 } g_tab_sys;
 
 preferences_tab* g_get_tab_sys()

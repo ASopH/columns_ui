@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "playlist_tabs.h"
 #include "main_window.h"
+#include "playlist_switcher_v2.h"
 
 cfg_guid cfg_default_playlist(GUID{0x68527c89, 0xb0f7, 0xf653, {0x00, 0x53, 0x8c, 0xeb, 0x47, 0xe7, 0xa3, 0xb3}},
     columns_ui::panels::guid_playlist_view_v2);
@@ -332,25 +333,22 @@ LRESULT WINAPI playlists_tabs_extension::hook(HWND wnd, UINT msg, WPARAM wp, LPA
         break;
     case WM_LBUTTONDBLCLK:
     case WM_MBUTTONUP: {
-        if (cfg_mclick || true || cfg_plm_rename) // in actuality we dont get messages when mouse not on tab here.
-        {
-            TCHITTESTINFO hittest;
-            hittest.pt.x = GET_X_LPARAM(lp);
-            hittest.pt.y = GET_Y_LPARAM(lp);
-            int idx = TabCtrl_HitTest(wnd_tabs, &hittest);
-            static_api_ptr_t<playlist_manager> playlist_api;
-            if (idx >= 0) {
-                if (cfg_mclick && msg == WM_MBUTTONUP) {
-                    remove_playlist_helper(idx);
-                }
-                if (cfg_plm_rename && msg == WM_LBUTTONDBLCLK) {
-                    g_rename_playlist(idx, get_wnd());
-                }
-            } else if (true) {
-                unsigned new_idx = playlist_api->create_playlist(
-                    pfc::string8("Untitled"), pfc_infinite, playlist_api->get_playlist_count());
-                playlist_api->set_active_playlist(new_idx);
+        TCHITTESTINFO hittest;
+        hittest.pt.x = GET_X_LPARAM(lp);
+        hittest.pt.y = GET_Y_LPARAM(lp);
+        int idx = TabCtrl_HitTest(wnd_tabs, &hittest);
+        static_api_ptr_t<playlist_manager> playlist_api;
+        if (idx >= 0) {
+            if (cui::config::cfg_playlist_tabs_middle_click && msg == WM_MBUTTONUP) {
+                remove_playlist_helper(idx);
             }
+            if (cfg_plm_rename && msg == WM_LBUTTONDBLCLK) {
+                playlist_manager_utils::rename_playlist(idx, get_wnd());
+            }
+        } else {
+            unsigned new_idx = playlist_api->create_playlist(
+                pfc::string8("Untitled"), pfc_infinite, playlist_api->get_playlist_count());
+            playlist_api->set_active_playlist(new_idx);
         }
     } break;
     case WM_MOUSEWHEEL:

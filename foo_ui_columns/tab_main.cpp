@@ -11,16 +11,13 @@ public:
 
     static void refresh_me(HWND wnd)
     {
-        SendDlgItemMessage(wnd, IDC_IMPORT_TITLES, BM_SETCHECK, cfg_import_titles, 0);
-        // SendDlgItemMessage(wnd,IDC_EXPORT_TITLES,BM_SETCHECK,cfg_export_titles,0);
-
         SendDlgItemMessage(wnd, IDC_TOOLBARS, BM_SETCHECK, cfg_toolbars, 0);
         // SendDlgItemMessage(wnd,IDC_KEYB,BM_SETCHECK,config_object::g_get_data_bool_simple(standard_config_objects::bool_show_keyboard_shortcuts_in_menus,
         // true),0);
         SendDlgItemMessage(wnd, IDC_USE_TRANSPARENCY, BM_SETCHECK, main_window::config_get_transparency_enabled(), 0);
         SendDlgItemMessage(wnd, IDC_TRANSPARENCY_SPIN, UDM_SETPOS32, 0, main_window::config_get_transparency_level());
 
-        if (!g_main_window)
+        if (!cui::main_window.get_wnd())
             EnableWindow(GetDlgItem(wnd, IDC_QUICKSETUP), FALSE);
 
         uSendDlgItemMessageText(wnd, IDC_STRING, WM_SETTEXT, NULL, main_window::config_main_window_title_script.get());
@@ -46,7 +43,7 @@ public:
                 break;
 
             case IDC_QUICKSETUP:
-                SendMessage(g_main_window, MSG_RUN_INITIAL_SETUP, NULL, NULL);
+                SendMessage(cui::main_window.get_wnd(), MSG_RUN_INITIAL_SETUP, NULL, NULL);
                 break;
             case IDC_FCL_EXPORT:
                 g_export_layout(wnd);
@@ -78,16 +75,16 @@ public:
                     == IDYES) {
                     extern cfg_rebar g_cfg_rebar;
 
-                    if (g_main_window)
+                    if (cui::main_window.get_wnd())
                         destroy_rebar();
                     g_cfg_rebar.reset();
-                    if (g_main_window) {
+                    if (cui::main_window.get_wnd()) {
                         create_rebar();
                         if (g_rebar) {
                             ShowWindow(g_rebar, SW_SHOWNORMAL);
                             UpdateWindow(g_rebar);
                         }
-                        size_windows();
+                        cui::main_window.resize_child_windows();
                     }
                 }
             } break; /*
@@ -104,7 +101,7 @@ public:
     HWND create(HWND wnd) override
     {
         return m_helper.create(
-            wnd, IDD_MAIN, [this](auto&&... args) { return ConfigProc(std::forward<decltype(args)>(args)...); });
+            wnd, IDD_PREFS_MAIN, [this](auto&&... args) { return ConfigProc(std::forward<decltype(args)>(args)...); });
     }
     const char* get_name() override { return "Main"; }
     bool get_help_url(pfc::string_base& p_out) override

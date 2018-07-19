@@ -1,7 +1,8 @@
 #include "stdafx.h"
 
-#include "playlist_view.h"
 #include "config.h"
+#include "playlist_view_tfhooks.h"
+#include "ng_playlist/ng_playlist_style.h"
 
 cfg_int g_cur_tab(GUID{0x1f7903e5, 0x9523, 0xac7e, {0xd4, 0xea, 0x13, 0xdd, 0xe5, 0xac, 0xc8, 0x66}}, 0);
 
@@ -41,7 +42,7 @@ void double_to_string(double blah, pfc::string_base& p_out, int points = 10, boo
     }
 }
 
-void speedtest(column_list_cref_t columns, bool b_global, bool b_legacy, bool b_date)
+void speedtest(column_list_cref_t columns, bool b_global)
 {
     static_api_ptr_t<playlist_manager> playlist_api;
     static_api_ptr_t<titleformat_compiler> titleformat_api;
@@ -109,8 +110,7 @@ void speedtest(column_list_cref_t columns, bool b_global, bool b_legacy, bool b_
         }
 
         SYSTEMTIME st;
-        if (b_date)
-            GetLocalTime(&st);
+        GetLocalTime(&st);
 
         {
             pfc::string8_fast_aggressive str_temp;
@@ -125,38 +125,13 @@ void speedtest(column_list_cref_t columns, bool b_global, bool b_legacy, bool b_
                             pfc::hires_timer timer;
                             timer.start();
                             {
-                                titleformat_hook_set_global<true, false> tf_hook_set_global(p_vars, b_legacy);
-                                if (b_date) {
-                                    titleformat_hook_date tf_hook_date(&st);
-                                    titleformat_hook_impl_splitter tf_hook(&tf_hook_set_global, &tf_hook_date);
-                                    playlist_api->activeplaylist_item_format_title(tracks[j], &tf_hook, str_temp,
-                                        to_global, nullptr, play_control::display_level_all);
-                                } else {
-                                    playlist_api->activeplaylist_item_format_title(tracks[j], &tf_hook_set_global,
-                                        str_temp, to_global, nullptr, play_control::display_level_all);
-                                }
+                                titleformat_hook_set_global<true, false> tf_hook_set_global(p_vars);
+                                titleformat_hook_date tf_hook_date(&st);
+                                titleformat_hook_impl_splitter tf_hook(&tf_hook_set_global, &tf_hook_date);
+                                playlist_api->activeplaylist_item_format_title(
+                                    tracks[j], &tf_hook, str_temp, to_global, nullptr, play_control::display_level_all);
 
                                 //    if (map_codes) extra_formatted.replace_char(3, 6);
-
-                                if (b_legacy) {
-                                    const char* ptr = str_temp;
-
-                                    const char* start = ptr;
-
-                                    while (*ptr) {
-                                        start = ptr;
-                                        while (*ptr && *ptr != '\x07')
-                                            ptr++;
-                                        if (ptr > start) {
-                                            const char* p_equal = strchr_n(start + 1, '=', ptr - start - 1);
-                                            if (p_equal) {
-                                                p_vars.add_item(start, p_equal - start, p_equal + 1, ptr - p_equal - 1);
-                                            }
-                                        }
-                                        while (*ptr && *ptr == '\x07')
-                                            ptr++;
-                                    }
-                                }
                             }
                             time_temp += timer.query();
                         }
@@ -169,14 +144,14 @@ void speedtest(column_list_cref_t columns, bool b_global, bool b_legacy, bool b_
                 if (b_global_colour_used)
                     for (unsigned i = 0; i < 10; i++) {
                         for (unsigned j = 0; j < 16; j++) {
-                            colourinfo col_item(0, 0, 0, 0, 0, 0);
+                            auto style_info = pvt::style_data_cell_info_t::g_create_default();
                             pfc::hires_timer timer;
                             timer.start();
-                            titleformat_hook_style tf_hook_style(col_item);
-                            titleformat_hook_set_global<false, true> tf_hook_set_global(p_vars, b_legacy);
+                            pvt::titleformat_hook_style_v2 tf_hook_style(style_info, 0);
+                            titleformat_hook_set_global<false, true> tf_hook_set_global(p_vars);
                             titleformat_hook_date tf_hook_date(&st);
-                            titleformat_hook_splitter_pt3 tf_hook(&tf_hook_style,
-                                b_global ? &tf_hook_set_global : nullptr, b_date ? &tf_hook_date : nullptr);
+                            titleformat_hook_splitter_pt3 tf_hook(
+                                &tf_hook_style, b_global ? &tf_hook_set_global : nullptr, &tf_hook_date);
 
                             playlist_api->activeplaylist_item_format_title(tracks[j], &tf_hook, str_temp,
                                 to_global_colour, nullptr, play_control::display_level_all);
@@ -203,10 +178,10 @@ void speedtest(column_list_cref_t columns, bool b_global, bool b_legacy, bool b_
                         for (unsigned j = 0; j < 16; j++) {
                             pfc::hires_timer timer;
                             timer.start();
-                            titleformat_hook_set_global<false, true> tf_hook_set_global(p_vars, b_legacy);
+                            titleformat_hook_set_global<false, true> tf_hook_set_global(p_vars);
                             titleformat_hook_date tf_hook_date(&st);
                             titleformat_hook_impl_splitter tf_hook(
-                                b_global ? &tf_hook_set_global : nullptr, b_date ? &tf_hook_date : nullptr);
+                                b_global ? &tf_hook_set_global : nullptr, &tf_hook_date);
 
                             playlist_api->activeplaylist_item_format_title(tracks[j], &tf_hook, str_temp,
                                 times_columns[n].to_display, nullptr, play_control::display_level_all);
@@ -233,14 +208,14 @@ void speedtest(column_list_cref_t columns, bool b_global, bool b_legacy, bool b_
                         time_temp = 0;
                         for (i = 0; i < 10; i++) {
                             for (unsigned j = 0; j < 16; j++) {
-                                colourinfo col_item(0, 0, 0, 0, 0, 0);
+                                auto style_info = pvt::style_data_cell_info_t::g_create_default();
                                 pfc::hires_timer timer;
                                 timer.start();
-                                titleformat_hook_style tf_hook_style(col_item);
-                                titleformat_hook_set_global<false, true> tf_hook_set_global(p_vars, b_legacy);
+                                pvt::titleformat_hook_style_v2 tf_hook_style(style_info, 0);
+                                titleformat_hook_set_global<false, true> tf_hook_set_global(p_vars);
                                 titleformat_hook_date tf_hook_date(&st);
-                                titleformat_hook_splitter_pt3 tf_hook(&tf_hook_style,
-                                    b_global ? &tf_hook_set_global : nullptr, b_date ? &tf_hook_date : nullptr);
+                                titleformat_hook_splitter_pt3 tf_hook(
+                                    &tf_hook_style, b_global ? &tf_hook_set_global : nullptr, &tf_hook_date);
 
                                 playlist_api->activeplaylist_item_format_title(tracks[j], &tf_hook, str_temp,
                                     times_columns[n].to_colour, nullptr, play_control::display_level_all);

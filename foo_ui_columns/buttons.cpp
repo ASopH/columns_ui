@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "buttons.h"
+#include "menu_items.h"
 
 #define ID_BUTTONS 2001
 
@@ -62,30 +63,33 @@ const GUID toolbar_extension::g_guid_fcb
 
 void toolbar_extension::reset_buttons(pfc::list_base_t<button>& p_buttons)
 {
+    const std::initializer_list<std::tuple<GUID, t_type, t_show, const char*>> default_buttons{
+        {standard_commands::guid_main_stop, TYPE_MENU_ITEM_MAIN, SHOW_IMAGE, nullptr},
+        {standard_commands::guid_main_pause, TYPE_MENU_ITEM_MAIN, SHOW_IMAGE, nullptr},
+        {standard_commands::guid_main_play, TYPE_MENU_ITEM_MAIN, SHOW_IMAGE, nullptr},
+        {standard_commands::guid_main_previous, TYPE_MENU_ITEM_MAIN, SHOW_IMAGE, nullptr},
+        {standard_commands::guid_main_next, TYPE_MENU_ITEM_MAIN, SHOW_IMAGE, nullptr},
+        {standard_commands::guid_main_random, TYPE_MENU_ITEM_MAIN, SHOW_IMAGE, nullptr},
+        {{}, TYPE_SEPARATOR, SHOW_IMAGE, nullptr},
+        {standard_commands::guid_main_open, TYPE_MENU_ITEM_MAIN, SHOW_IMAGE, nullptr},
+        {{}, TYPE_SEPARATOR, SHOW_IMAGE, nullptr},
+        {cui::main_menu::commands::toggle_live_editing_id, TYPE_MENU_ITEM_MAIN, SHOW_TEXT, "Live layout editing"},
+    };
+
     p_buttons.remove_all();
-    button temp{};
 
-    temp.m_type = TYPE_MENU_ITEM_MAIN;
-    temp.m_show = SHOW_IMAGE;
-
-    temp.m_guid = standard_commands::guid_main_stop;
-    p_buttons.add_item(temp);
-    temp.m_guid = standard_commands::guid_main_pause;
-    p_buttons.add_item(temp);
-    temp.m_guid = standard_commands::guid_main_play;
-    p_buttons.add_item(temp);
-    temp.m_guid = standard_commands::guid_main_previous;
-    p_buttons.add_item(temp);
-    temp.m_guid = standard_commands::guid_main_next;
-    p_buttons.add_item(temp);
-    temp.m_guid = standard_commands::guid_main_random;
-    p_buttons.add_item(temp);
-    temp.m_guid = pfc::guid_null;
-    temp.m_type = TYPE_SEPARATOR;
-    p_buttons.add_item(temp);
-    temp.m_guid = standard_commands::guid_main_open;
-    temp.m_type = TYPE_MENU_ITEM_MAIN;
-    p_buttons.add_item(temp);
+    for (auto&& default_button : default_buttons) {
+        const auto& [guid, type, show, text] = default_button;
+        button temp{};
+        temp.m_type = type;
+        temp.m_show = show;
+        temp.m_guid = guid;
+        if (text) {
+            temp.m_use_custom_text = true;
+            temp.m_text = text;
+        }
+        p_buttons.add_item(temp);
+    }
 }
 
 toolbar_extension::toolbar_extension()
@@ -450,10 +454,8 @@ LRESULT toolbar_extension::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
                 caller = contextmenu_item::caller_active_playlist_selection;
             } break;
             case FILTER_ACTIVE_SELECTION: {
-                static_api_ptr_t<ui_selection_manager> api;
-                if (api->get_selection_type() != contextmenu_item::caller_now_playing) {
-                    api->get_selection(data);
-                }
+                auto api = ui_selection_manager_v2::get();
+                api->get_selection(data, ui_selection_manager_v2::flag_no_now_playing);
                 caller = contextmenu_item::caller_undefined;
             } break;
             case FILTER_PLAYING: {
@@ -680,7 +682,8 @@ bool toolbar_extension::show_config_popup(HWND wnd_parent)
     param.m_image = nullptr;
     param.m_text_below = m_text_below;
     param.m_appearance = m_appearance;
-    bool rv = !!uDialogBox(IDD_BUTTONS, wnd_parent, config_param::g_ConfigPopupProc, reinterpret_cast<LPARAM>(&param));
+    bool rv = !!uDialogBox(
+        IDD_BUTTONS_OPTIONS, wnd_parent, config_param::g_ConfigPopupProc, reinterpret_cast<LPARAM>(&param));
     if (rv) {
         configure(param.m_buttons, param.m_text_below, param.m_appearance);
     }
